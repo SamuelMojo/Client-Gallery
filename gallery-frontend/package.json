@@ -12,6 +12,7 @@
   "dependencies": {
     "@aws-amplify/auth": "^6.20.0",
     "aws-amplify": "^6.20.0",
+    "browser-image-compression": "^2.0.2",
     "lucide-react": "^1.41.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
