@@ -25,6 +25,10 @@ jobs:
           cd gallery-frontend
           npm ci
           npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_CDN_URL: ${{ vars.VITE_CDN_URL }}
+          VITE_ZIPPER_URL: ${{ vars.VITE_ZIPPER_URL }}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -35,8 +39,8 @@ jobs:
 
       - name: Sync to S3
         run: |
-          aws s3 sync gallery-frontend/dist/ s3://samuelojo-client-gallery-2026 --delete
+          aws s3 sync gallery-frontend/dist/ s3://samuelojo-portfolio-primary-2026 --delete
 
       - name: Invalidate CloudFront Cache
         run: |
-          aws cloudfront create-invalidation --distribution-id ${{ secrets.GALLERY_CLOUDFRONT_ID }} --paths "/*"
+          aws cloudfront create-invalidation --distribution-id ${{ secrets.GALLERY_CLOUDFRONT_ID || 'E1B2IZH9JKGO9B' }} --paths "/*"
