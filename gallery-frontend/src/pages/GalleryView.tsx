@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 
 interface GalleryImage {
   fileName: string;
@@ -12,16 +12,23 @@ interface GalleryData {
   title: string;
   clientName: string;
   createdAt: string;
+  isPublic?: boolean;
+  accessPin?: string;
   images: GalleryImage[];
 }
 
-export default function ClientGallery() {
+export default function GalleryView() {
   const { id: galleryId } = useParams<{ id: string }>();
   const [gallery, setGallery] = useState<GalleryData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activePhoto, setActivePhoto] = useState<GalleryImage | null>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+
+  // PIN validation state
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
 
   const CDN_BASE = import.meta.env.VITE_CDN_URL;
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
@@ -36,8 +43,14 @@ export default function ClientGallery() {
         const data = await res.json();
         
         // Normalize DynamoDB item structure
-        const item = data.gallery || data;
+        const item: GalleryData = data.gallery || data;
         setGallery(item);
+
+        // Check if gallery is public OR if client already unlocked it in this session
+        const alreadyUnlocked = sessionStorage.getItem(`unlocked_${galleryId}`) === 'true';
+        if (item.isPublic || alreadyUnlocked) {
+          setIsUnlocked(true);
+        }
       } catch (err: any) {
         setError(err.message || 'Failed to load gallery');
       } finally {
@@ -49,6 +62,20 @@ export default function ClientGallery() {
       fetchGallery();
     }
   }, [galleryId, API_BASE]);
+
+  // Handle PIN unlock form
+  const handlePinUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!gallery) return;
+
+    if (pinInput.trim() === gallery.accessPin?.trim()) {
+      sessionStorage.setItem(`unlocked_${gallery.galleryId}`, 'true');
+      setIsUnlocked(true);
+      setPinError('');
+    } else {
+      setPinError('Incorrect access PIN. Please try again.');
+    }
+  };
 
   // Handle single high-res download
   const handleSingleDownload = async (img: GalleryImage) => {
@@ -94,8 +121,60 @@ export default function ClientGallery() {
 
   if (error || !gallery) {
     return (
-      <div className="min-h-screen bg-black text-neutral-400 flex items-center justify-center">
+      <div className="min-h-screen bg-black text-neutral-400 flex flex-col items-center justify-center gap-4">
         <p className="text-sm">{error || 'Gallery unavailable'}</p>
+        <Link to="/" className="text-xs text-neutral-500 hover:text-neutral-300 underline uppercase tracking-widest">
+          Return to Home
+        </Link>
+      </div>
+    );
+  }
+
+  // Gatekeeper: Display PIN challenge if gallery is private and not yet unlocked
+  if (!isUnlocked) {
+    return (
+      <div className="min-h-screen bg-black text-neutral-100 flex flex-col items-center justify-center px-4">
+        <div className="max-w-md w-full p-8 border border-neutral-800 bg-neutral-950 rounded-lg text-center space-y-6">
+          <div>
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500">
+              Private Collection
+            </span>
+            <h1 className="text-2xl font-light tracking-tight mt-1">{gallery.title}</h1>
+            <p className="text-xs text-neutral-400 mt-1">{gallery.clientName}</p>
+          </div>
+
+          <form onSubmit={handlePinUnlock} className="space-y-4">
+            <div>
+              <label htmlFor="galleryPin" className="block text-xs text-neutral-400 uppercase tracking-wider mb-2">
+                Enter 4-Digit Access PIN
+              </label>
+              <input
+                id="galleryPin"
+                type="password"
+                maxLength={4}
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
+                placeholder="••••"
+                autoFocus
+                className="w-36 text-center text-2xl tracking-[0.4em] py-2 bg-neutral-900 border border-neutral-800 rounded font-mono text-white focus:outline-none focus:border-neutral-500"
+              />
+            </div>
+
+            {pinError && <p className="text-xs text-rose-500">{pinError}</p>}
+
+            <button
+              type="submit"
+              disabled={pinInput.length !== 4}
+              className="w-full py-2.5 bg-neutral-100 hover:bg-white text-black text-xs font-semibold uppercase tracking-wider rounded transition disabled:opacity-40"
+            >
+              Unlock Gallery
+            </button>
+          </form>
+
+          <Link to="/" className="block text-xs text-neutral-600 hover:text-neutral-400">
+            ← Back to Home
+          </Link>
+        </div>
       </div>
     );
   }
@@ -107,6 +186,9 @@ export default function ClientGallery() {
         <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <div className="flex items-baseline gap-3 flex-wrap">
+              <Link to="/" className="text-xs text-neutral-500 hover:text-neutral-300 transition mr-2">
+                ← Home
+              </Link>
               <h1 className="text-2xl font-light tracking-tight">{gallery.title}</h1>
               {gallery.createdAt && (
                 <span className="text-xs text-neutral-500 font-mono tracking-wider">

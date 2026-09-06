@@ -5,9 +5,11 @@ import { useNavigate } from 'react-router-dom';
 export default function AdminDashboard() {
   const [title, setTitle] = useState('');
   const [clientName, setClientName] = useState('');
+  const [isPublic, setIsPublic] = useState(false);
   const [files, setFiles] = useState<FileList | null>(null);
   const [status, setStatus] = useState('');
   const [createdUrl, setCreatedUrl] = useState('');
+  const [createdPin, setCreatedPin] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -25,17 +27,18 @@ export default function AdminDashboard() {
 
       const fileNames = Array.from(files).map((f) => f.name);
 
-      // 1. Request presigned URLs from Lambda
+      // 1. Request presigned URLs from Lambda including public toggle
       const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/admin/galleries`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ title, clientName, fileNames })
+        body: JSON.stringify({ title, clientName, fileNames, isPublic })
       });
 
-      const { galleryId, uploadUrls } = await res.json();
+      const data = await res.json();
+      const { galleryId, uploadUrls, accessPin } = data;
 
       // 2. Upload each file directly to S3
       setStatus(`Uploading ${files.length} images to S3...`);
@@ -52,6 +55,7 @@ export default function AdminDashboard() {
       }
 
       setStatus('Complete!');
+      setCreatedPin(accessPin);
       setCreatedUrl(`${window.location.origin}/g/${galleryId}`);
     } catch (err: any) {
       setStatus(`Upload failed: ${err.message}`);
@@ -75,7 +79,7 @@ export default function AdminDashboard() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded"
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded focus:border-neutral-500 focus:outline-none"
           />
         </div>
         <div>
@@ -85,9 +89,24 @@ export default function AdminDashboard() {
             value={clientName}
             onChange={(e) => setClientName(e.target.value)}
             required
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded"
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded focus:border-neutral-500 focus:outline-none"
           />
         </div>
+
+        {/* Public Collection Checkbox */}
+        <div className="flex items-center gap-3 py-2">
+          <input
+            type="checkbox"
+            id="isPublic"
+            checked={isPublic}
+            onChange={(e) => setIsPublic(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-800 bg-gray-900 text-blue-600 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+          />
+          <label htmlFor="isPublic" className="text-sm text-gray-300 select-none cursor-pointer">
+            Feature publicly on homepage (<span className="text-neutral-500 font-mono">gallery.samuelojo.tech</span>)
+          </label>
+        </div>
+
         <div>
           <label className="block text-sm mb-1 text-gray-400">Photos</label>
           <input
@@ -95,21 +114,33 @@ export default function AdminDashboard() {
             multiple
             accept="image/*"
             onChange={(e) => setFiles(e.target.files)}
-            className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-gray-800 file:text-white"
+            className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-gray-800 file:text-white cursor-pointer"
           />
         </div>
-        <button type="submit" className="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded font-medium">
+        <button type="submit" className="w-full py-2 bg-blue-600 hover:bg-blue-500 rounded font-medium transition">
           Create & Upload
         </button>
       </form>
 
       {status && <p className="mt-4 text-sm text-gray-300">{status}</p>}
+
       {createdUrl && (
-        <div className="mt-6 p-4 bg-gray-900 border border-green-700/50 rounded">
-          <p className="text-sm text-green-400 mb-1">Shareable Gallery URL:</p>
-          <a href={createdUrl} target="_blank" rel="noreferrer" className="text-blue-400 underline break-all">
-            {createdUrl}
-          </a>
+        <div className="mt-6 p-5 bg-gray-900 border border-neutral-800 rounded-lg space-y-3">
+          <p className="text-sm text-emerald-400 font-medium">✓ Gallery Created Successfully</p>
+          
+          <div className="flex items-center justify-between border-t border-neutral-800 pt-3">
+            <span className="text-xs text-gray-400 uppercase tracking-wider">Access PIN:</span>
+            <span className="font-mono text-xl font-bold tracking-widest text-white">
+              {createdPin || '----'}
+            </span>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-t border-neutral-800 pt-3">
+            <span className="text-xs text-gray-400 uppercase tracking-wider">Shareable URL:</span>
+            <a href={createdUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline break-all text-sm font-mono">
+              {createdUrl}
+            </a>
+          </div>
         </div>
       )}
     </div>

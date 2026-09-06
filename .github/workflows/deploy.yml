@@ -26,6 +26,8 @@ jobs:
           npm ci
           npm run build
         env:
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
           VITE_CDN_URL: ${{ vars.VITE_CDN_URL }}
           VITE_ZIPPER_URL: ${{ vars.VITE_ZIPPER_URL }}
