@@ -103,8 +103,9 @@ export default function GalleryView() {
     if (!galleryId) return;
     setIsDownloadingAll(true);
 
-    // Direct browser navigation to Function URL forces the Content-Disposition attachment stream
-    const downloadEndpoint = `${ZIPPER_URL}?galleryId=${encodeURIComponent(galleryId)}`;
+    // Pass sanitized gallery title to Lambda for friendly filename
+    const galleryTitle = gallery?.title || 'Photos';
+    const downloadEndpoint = `${ZIPPER_URL}?galleryId=${encodeURIComponent(galleryId)}&title=${encodeURIComponent(galleryTitle)}`;
     window.location.assign(downloadEndpoint);
 
     // Reset button state after brief delay
