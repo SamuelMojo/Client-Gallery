@@ -7,6 +7,7 @@ interface PublicGallery {
   title: string;
   clientName: string;
   coverKey?: string;
+  coverImage?: string;
   imagesCount?: number;
 }
 
@@ -52,7 +53,6 @@ export default function Home() {
   const fetchPublicGalleries = async () => {
     try {
       setLoadingGalleries(true);
-      // Route matches GET /galleries/public in API Gateway
       const res = await fetch(`${API_BASE}/galleries/public`);
       if (res.ok) {
         const data = await res.json();
@@ -77,7 +77,6 @@ export default function Home() {
       setIsVerifyingPin(true);
       setPinError('');
 
-      // Route matches POST /galleries/verify-pin in API Gateway
       const res = await fetch(`${API_BASE}/galleries/verify-pin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -378,32 +377,36 @@ export default function Home() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {publicGalleries.map((gal) => (
-                <Link
-                  key={gal.galleryId}
-                  to={`/g/${gal.galleryId}`}
-                  className="group block relative aspect-[4/3] bg-neutral-950 border border-neutral-900 overflow-hidden rounded-sm hover:border-neutral-700 transition"
-                >
-                  {gal.coverKey ? (
-                    <img
-                      src={`${CDN_BASE}/${gal.coverKey}`}
-                      alt={gal.title}
-                      loading="lazy"
-                      className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-neutral-700 font-mono text-xs">
-                      No Preview
-                    </div>
-                  )}
+              {publicGalleries.map((gal) => {
+                const imageKey = gal.coverImage || gal.coverKey;
 
-                  {/* Caption Overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-5 transition opacity-90 group-hover:opacity-100">
-                    <h3 className="text-sm font-light text-white tracking-wide">{gal.title}</h3>
-                    <p className="text-xs text-neutral-400 mt-0.5">{gal.clientName}</p>
-                  </div>
-                </Link>
-              ))}
+                return (
+                  <Link
+                    key={gal.galleryId}
+                    to={`/g/${gal.galleryId}`}
+                    className="group block relative aspect-[4/3] bg-neutral-950 border border-neutral-900 overflow-hidden rounded-sm hover:border-neutral-700 transition"
+                  >
+                    {imageKey ? (
+                      <img
+                        src={`${CDN_BASE}/${encodeURI(imageKey)}`}
+                        alt={gal.title}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-neutral-700 font-mono text-xs">
+                        No Preview
+                      </div>
+                    )}
+
+                    {/* Caption Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-5 transition opacity-90 group-hover:opacity-100">
+                      <h3 className="text-sm font-light text-white tracking-wide">{gal.title}</h3>
+                      <p className="text-xs text-neutral-400 mt-0.5">{gal.clientName}</p>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </section>
