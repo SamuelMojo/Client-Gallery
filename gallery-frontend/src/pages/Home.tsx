@@ -52,7 +52,8 @@ export default function Home() {
   const fetchPublicGalleries = async () => {
     try {
       setLoadingGalleries(true);
-      const res = await fetch(`${API_BASE}/public/galleries`);
+      // Route matches GET /galleries/public in API Gateway
+      const res = await fetch(`${API_BASE}/galleries/public`);
       if (res.ok) {
         const data = await res.json();
         setPublicGalleries(data.galleries || []);
@@ -76,7 +77,8 @@ export default function Home() {
       setIsVerifyingPin(true);
       setPinError('');
 
-      const res = await fetch(`${API_BASE}/public/verify-pin`, {
+      // Route matches POST /galleries/verify-pin in API Gateway
+      const res = await fetch(`${API_BASE}/galleries/verify-pin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin: pin.trim() }),

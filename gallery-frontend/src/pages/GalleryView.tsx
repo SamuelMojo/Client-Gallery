@@ -63,20 +63,39 @@ export default function GalleryView() {
     }
   }, [galleryId, API_BASE]);
 
-  // Handle PIN unlock form
-  const handlePinUnlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!gallery) return;
+  // Replace handlePinUnlock in GalleryView.tsx:
+const handlePinUnlock = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!galleryId) return;
 
-    if (pinInput.trim() === gallery.accessPin?.trim()) {
-      sessionStorage.setItem(`unlocked_${gallery.galleryId}`, 'true');
+  setPinError('');
+
+  try {
+    const res = await fetch(`${API_BASE}/galleries/verify-pin`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        galleryId: galleryId,
+        pin: pinInput.trim(),
+      }),
+    });
+
+    const data = await res.json();
+
+    if (res.ok && (data.valid || data.success || data.unlocked)) {
+      sessionStorage.setItem(`unlocked_${galleryId}`, 'true');
       setIsUnlocked(true);
       setPinError('');
     } else {
-      setPinError('Incorrect access PIN. Please try again.');
+      setPinError(data.message || data.error || 'Incorrect access PIN. Please try again.');
     }
-  };
-
+  } catch (err) {
+    setPinError('Failed to verify PIN. Please try again.');
+  }
+  
+};
   // Handle single high-res download
   const handleSingleDownload = async (img: GalleryImage) => {
     try {
