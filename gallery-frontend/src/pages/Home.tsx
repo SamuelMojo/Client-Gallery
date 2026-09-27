@@ -178,12 +178,23 @@ export default function Home() {
           <span className="text-[10px] text-neutral-500 uppercase tracking-widest block">Photography & Portfolio</span>
         </div>
 
-        <button
-          onClick={() => setIsAdminOpen(!isAdminOpen)}
-          className="text-xs tracking-wider uppercase text-neutral-400 hover:text-white transition px-3 py-1.5 border border-neutral-800 rounded bg-neutral-950"
-        >
-          {isAdminOpen ? 'Close Portal' : isAdminAuthenticated ? 'Admin Panel' : 'Admin Login'}
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Back to Main Site Button */}
+          <a
+            href="https://samuelojo.tech"
+            className="text-xs tracking-wider uppercase text-neutral-400 hover:text-white transition px-3 py-1.5 border border-neutral-800 rounded bg-neutral-950 flex items-center gap-1.5"
+          >
+            <span>←</span>
+            <span>samuelojo.tech</span>
+          </a>
+
+          <button
+            onClick={() => setIsAdminOpen(!isAdminOpen)}
+            className="text-xs tracking-wider uppercase text-neutral-400 hover:text-white transition px-3 py-1.5 border border-neutral-800 rounded bg-neutral-950"
+          >
+            {isAdminOpen ? 'Close Portal' : isAdminAuthenticated ? 'Admin Panel' : 'Admin Login'}
+          </button>
+        </div>
       </header>
 
       {/* Admin Expandable Portal Panel */}
@@ -413,8 +424,14 @@ export default function Home() {
       </main>
 
       {/* Minimal Footer */}
-      <footer className="border-t border-neutral-900 px-6 py-6 text-center text-[10px] uppercase tracking-widest text-neutral-600">
-        © {new Date().getFullYear()} Samuel Ojo. All rights reserved.
+      <footer className="border-t border-neutral-900 px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[10px] uppercase tracking-widest text-neutral-600 max-w-7xl mx-auto w-full">
+        <span>© {new Date().getFullYear()} Samuel Ojo. All rights reserved.</span>
+        <a
+          href="https://samuelojo.tech"
+          className="hover:text-neutral-400 transition underline underline-offset-4"
+        >
+          Return to samuelojo.tech
+        </a>
       </footer>
     </div>
   );
