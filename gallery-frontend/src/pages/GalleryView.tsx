@@ -14,6 +14,7 @@ interface GalleryData {
   createdAt: string;
   isPublic?: boolean;
   accessPin?: string;
+  pin?: string;
   images: GalleryImage[];
 }
 
@@ -29,10 +30,14 @@ export default function GalleryView() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
+  const [copied, setCopied] = useState(false);
 
   const CDN_BASE = import.meta.env.VITE_CDN_URL;
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
   const ZIPPER_URL = import.meta.env.VITE_ZIPPER_URL;
+
+  const currentUrl = window.location.href;
+  const pinDisplay = gallery?.accessPin || gallery?.pin;
 
   useEffect(() => {
     async function fetchGallery() {
@@ -63,39 +68,44 @@ export default function GalleryView() {
     }
   }, [galleryId, API_BASE]);
 
-  // Replace handlePinUnlock in GalleryView.tsx:
-const handlePinUnlock = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!galleryId) return;
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(currentUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
-  setPinError('');
+  const handlePinUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!galleryId) return;
 
-  try {
-    const res = await fetch(`${API_BASE}/galleries/verify-pin`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        galleryId: galleryId,
-        pin: pinInput.trim(),
-      }),
-    });
+    setPinError('');
 
-    const data = await res.json();
+    try {
+      const res = await fetch(`${API_BASE}/galleries/verify-pin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          galleryId: galleryId,
+          pin: pinInput.trim(),
+        }),
+      });
 
-    if (res.ok && (data.valid || data.success || data.unlocked)) {
-      sessionStorage.setItem(`unlocked_${galleryId}`, 'true');
-      setIsUnlocked(true);
-      setPinError('');
-    } else {
-      setPinError(data.message || data.error || 'Incorrect access PIN. Please try again.');
+      const data = await res.json();
+
+      if (res.ok && (data.valid || data.success || data.unlocked)) {
+        sessionStorage.setItem(`unlocked_${galleryId}`, 'true');
+        setIsUnlocked(true);
+        setPinError('');
+      } else {
+        setPinError(data.message || data.error || 'Incorrect access PIN. Please try again.');
+      }
+    } catch {
+      setPinError('Failed to verify PIN. Please try again.');
     }
-  } catch (err) {
-    setPinError('Failed to verify PIN. Please try again.');
-  }
-  
-};
+  };
+
   // Handle single high-res download
   const handleSingleDownload = async (img: GalleryImage) => {
     try {
@@ -112,7 +122,6 @@ const handlePinUnlock = async (e: React.FormEvent) => {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
     } catch {
-      // Fallback: Open CloudFront direct link in new tab if blob fetch fails
       window.open(`${CDN_BASE}/${img.originalKey}`, '_blank');
     }
   };
@@ -122,12 +131,10 @@ const handlePinUnlock = async (e: React.FormEvent) => {
     if (!galleryId) return;
     setIsDownloadingAll(true);
 
-    // Pass sanitized gallery title to Lambda for friendly filename
     const galleryTitle = gallery?.title || 'Photos';
     const downloadEndpoint = `${ZIPPER_URL}?galleryId=${encodeURIComponent(galleryId)}&title=${encodeURIComponent(galleryTitle)}`;
     window.location.assign(downloadEndpoint);
 
-    // Reset button state after brief delay
     setTimeout(() => setIsDownloadingAll(false), 4000);
   };
 
@@ -191,6 +198,23 @@ const handlePinUnlock = async (e: React.FormEvent) => {
             </button>
           </form>
 
+          {/* Quick share widget on locked screen */}
+          <div className="pt-2 border-t border-neutral-900 flex items-center justify-between gap-2">
+            <input
+              type="text"
+              readOnly
+              value={currentUrl}
+              className="bg-neutral-900 border border-neutral-800 rounded px-2.5 py-1 text-[11px] font-mono text-neutral-400 w-full truncate focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-[10px] font-semibold uppercase tracking-wider rounded transition whitespace-nowrap"
+            >
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+
           <Link to="/" className="block text-xs text-neutral-600 hover:text-neutral-400">
             ← Back to Home
           </Link>
@@ -238,8 +262,38 @@ const handlePinUnlock = async (e: React.FormEvent) => {
         </div>
       </header>
 
+      {/* Gallery Details / Share / PIN Bar */}
+      <section className="max-w-7xl mx-auto px-6 mt-6">
+        <div className="bg-neutral-950 border border-neutral-900 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-neutral-500 uppercase tracking-widest text-[11px] font-medium">
+              Access PIN
+            </span>
+            <span className="font-mono text-base font-semibold tracking-widest text-emerald-400 bg-neutral-900 px-3 py-1 rounded border border-neutral-800">
+              {pinDisplay || 'None'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input
+              type="text"
+              readOnly
+              value={currentUrl}
+              className="bg-neutral-900 border border-neutral-800 rounded px-3 py-1.5 font-mono text-xs text-neutral-400 w-full sm:w-80 truncate focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleCopyLink}
+              className="px-3.5 py-1.5 bg-neutral-100 hover:bg-white text-black font-semibold uppercase tracking-wider text-[11px] rounded transition whitespace-nowrap"
+            >
+              {copied ? 'Copied!' : 'Copy Link'}
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* Grid: Uses the auto-compressed WebP keys */}
-      <main className="max-w-7xl mx-auto px-6 mt-8">
+      <main className="max-w-7xl mx-auto px-6 mt-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {gallery.images?.map((img) => (
             <div
