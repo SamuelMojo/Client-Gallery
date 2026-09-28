@@ -1,64 +1,99 @@
-name: Deploy Client Gallery
+name: CI/CD Pipeline - Client Gallery
 
 on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
-  id-token: write   # Required for requesting the temporary OIDC JWT token
-  contents: read    # Required to check out your repository code
+  id-token: write   # Required for requesting the OIDC JWT token
+  contents: read    # Required for actions/checkout
 
 jobs:
-  deploy:
+  # ==========================================
+  # STAGE 1: CI QUALITY GATES
+  # ==========================================
+  quality-gates:
+    name: Code Quality & Security Audits
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gallery-frontend
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: 'npm'
           cache-dependency-path: gallery-frontend/package-lock.json
 
-      - name: Install & Build
-        run: |
-          cd gallery-frontend
-          npm ci
-          npm run build
+      - name: Clean Dependency Installation
+        run: npm ci
+
+      - name: Gate 1 - Dependency Vulnerability Audit
+        run: npm audit --audit-level=high
+
+      - name: Gate 2 - Strict TypeScript Typecheck
+        run: npx tsc --noEmit
+
+      - name: Gate 3 - ESLint Static Analysis
+        run: npm run lint
+
+  # ==========================================
+  # STAGE 2: BUILD & CONTINUOUS DEPLOYMENT
+  # ==========================================
+  deploy:
+    name: Build & Deploy to AWS (S3 / CloudFront)
+    needs: quality-gates
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gallery-frontend
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: gallery-frontend/package-lock.json
+
+      - name: Clean Dependency Installation
+        run: npm ci
+
+      - name: Build Static Production Assets
         env:
-          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
-          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
           VITE_CDN_URL: ${{ vars.VITE_CDN_URL }}
-          VITE_ZIPPER_URL: ${{ vars.VITE_ZIPPER_URL }}
-      - name: Debug OIDC Token Claims
-        run: |
-          # Request the OIDC JWT token directly from the GitHub runner environment
-          TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-            -H "User-Agent: actions/oidc-client" \
-            -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" | jq -r '.value')
-          
-          # Decode the payload of the JWT and print the exact claims
-          echo "=== Decoded OIDC Token Claims ==="
-          echo "$TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | jq '{sub: .sub, aud: .aud, repository: .repository, repository_owner: .repository_owner, job_workflow_ref: .job_workflow_ref}'
-
-    
+          VITE_COGNITO_USER_POOL_ID: ${{ vars.VITE_COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
+        run: npm run build
 
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::094813111563:role/GitHubActionsGalleryRole
-          aws-region: us-east-1
+          aws-region: eu-west-2
+          audience: sts.amazonaws.com
 
-      - name: Sync to S3
+      - name: Sync Build Output to Amazon S3
         run: |
-          aws s3 sync gallery-frontend/dist/ s3://samuelojo-client-gallery-2026 --delete
+          aws s3 sync dist/ s3://samuelojo-client-gallery-2026/ --delete
 
-      - name: Invalidate CloudFront Cache
+      - name: Invalidate Amazon CloudFront Cache
         run: |
-          aws cloudfront create-invalidation --distribution-id E1B2IZH9JKGO9B --paths "/*"
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID || 'E1B2IZH9JKGO9B' }} \
+            --paths "/*"

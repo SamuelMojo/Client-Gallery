@@ -41,18 +41,8 @@ export default function Home() {
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
   const CDN_BASE = import.meta.env.VITE_CDN_URL;
 
-  // Check admin session on load
-  useEffect(() => {
-    getCurrentUser()
-      .then(() => setIsAdminAuthenticated(true))
-      .catch(() => setIsAdminAuthenticated(false));
-
-    fetchPublicGalleries();
-  }, []);
-
-  const fetchPublicGalleries = async () => {
+  const loadPublicGalleries = async () => {
     try {
-      setLoadingGalleries(true);
       const res = await fetch(`${API_BASE}/galleries/public`);
       if (res.ok) {
         const data = await res.json();
@@ -64,6 +54,34 @@ export default function Home() {
       setLoadingGalleries(false);
     }
   };
+
+  // Check admin session and load public galleries on initial mount
+  useEffect(() => {
+    getCurrentUser()
+      .then(() => setIsAdminAuthenticated(true))
+      .catch(() => setIsAdminAuthenticated(false));
+
+    let isMounted = true;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/galleries/public`);
+        if (res.ok && isMounted) {
+          const data = await res.json();
+          setPublicGalleries(data.galleries || []);
+        }
+      } catch {
+        // Gracefully handle silent fail for public listing
+      } finally {
+        if (isMounted) {
+          setLoadingGalleries(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [API_BASE]);
 
   // 1. PIN Unlock Handler
   const handlePinSubmit = async (e: React.FormEvent) => {
@@ -163,7 +181,7 @@ export default function Home() {
       setTitle('');
       setClientName('');
       setFiles(null);
-      fetchPublicGalleries();
+      loadPublicGalleries();
     } catch (err: any) {
       setUploadStatus(`Upload failed: ${err.message}`);
     }
@@ -246,7 +264,7 @@ export default function Home() {
               <form onSubmit={handleUpload} className="space-y-4">
                 <div className="flex justify-between items-center pb-3 border-b border-neutral-800 mb-4">
                   <span className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
-                    ● Admin Active
+                    Active Admin Session
                   </span>
                   <button
                     type="button"
