@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  id-token: write   # Required for requesting the temporary OIDC JWT token
+  contents: read    # Required to check out your repository code
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -33,11 +37,10 @@ jobs:
           VITE_CDN_URL: ${{ vars.VITE_CDN_URL }}
           VITE_ZIPPER_URL: ${{ vars.VITE_ZIPPER_URL }}
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::094813111563:role/GitHubActionsGalleryRole
           aws-region: us-east-1
 
       - name: Sync to S3
