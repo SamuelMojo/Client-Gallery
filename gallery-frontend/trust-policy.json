@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::094813111563:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": [
+            "repo:SamuelMojo*/Client-Gallery*:*",
+            "repo:SamuelMojo/Client-Gallery:*"
+          ],
+          "token.actions.githubusercontent.com:job_workflow_ref": "SamuelMojo/Client-Gallery/.github/workflows/deploy.yml@*"
+        }
+      }
+    }
+  ]
+}
