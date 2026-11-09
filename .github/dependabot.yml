@@ -1,0 +1,17 @@
+version: 2
+updates:
+  # Frontend npm dependencies — minor/patch bumps grouped into one weekly PR.
+  - package-ecosystem: npm
+    directory: /gallery-frontend
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  # Keeps the SHA-pinned GitHub Actions in deploy.yml up to date.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

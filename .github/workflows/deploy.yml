@@ -10,15 +10,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write   # Required for requesting the OIDC JWT token
   contents: read    # Required for actions/checkout
+
+env:
+  BUCKET: samuelojo-client-gallery-2026
+  SITE_URL: https://gallery.samuelojo.tech
 
 jobs:
   # ==========================================
-  # STAGE 1: CI QUALITY GATES
+  # STAGE 1: QUALITY GATES + BUILD
+  # Builds once; the exact dist/ that passed the gates is what gets deployed.
   # ==========================================
-  quality-gates:
-    name: Code Quality & Security Audits
+  build:
+    name: Quality Gates & Build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -26,52 +30,28 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+      - name: Setup Node.js 22
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: gallery-frontend/package-lock.json
 
       - name: Clean Dependency Installation
         run: npm ci
 
-      - name: Gate 1 - Dependency Vulnerability Audit
-        run: npm audit --audit-level=high
+      # Only audits what ships to the browser; dev-tool advisories are
+      # handled by Dependabot PRs instead of blocking deploys.
+      - name: Gate 1 - Production Dependency Audit
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Gate 2 - Strict TypeScript Typecheck
         run: npx tsc --noEmit
 
       - name: Gate 3 - ESLint Static Analysis
         run: npm run lint
-
-  # ==========================================
-  # STAGE 2: BUILD & CONTINUOUS DEPLOYMENT
-  # ==========================================
-  deploy:
-    name: Build & Deploy to AWS (S3 / CloudFront)
-    needs: quality-gates
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: gallery-frontend
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-          cache-dependency-path: gallery-frontend/package-lock.json
-
-      - name: Clean Dependency Installation
-        run: npm ci
 
       - name: Build Static Production Assets
         env:
@@ -81,22 +61,92 @@ jobs:
           VITE_COGNITO_CLIENT_ID: ${{ vars.VITE_COGNITO_CLIENT_ID }}
         run: npm run build
 
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: gallery-frontend/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  # ==========================================
+  # STAGE 2: DEPLOY (main only)
+  # ==========================================
+  deploy:
+    name: Deploy to AWS (S3 / CloudFront)
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    # Only the deploy job can request AWS credentials (not PR checks).
+    permissions:
+      id-token: write
+      contents: read
+    # Never run two deploys at once; a newer push waits for the current one.
+    concurrency:
+      group: deploy-client-gallery
+      cancel-in-progress: false
+
+    steps:
+      - name: Download Build Artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+
       - name: Configure AWS Credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::094813111563:role/GitHubActionsGalleryRole
-          aws-region: eu-west-2
+          aws-region: us-east-1
           audience: sts.amazonaws.com
 
-      # galleries/ holds client photos uploaded through the admin dashboard,
-      # not build output — exclude it so --delete never wipes them.
-      - name: Sync Build Output to Amazon S3
+      # Upload order avoids a broken window: new hashed assets first,
+      # then index.html that points at them, then delete stale files.
+      # galleries/ holds client photos uploaded via the admin dashboard,
+      # not build output — it is excluded everywhere so deploys never touch it.
+      - name: Upload Hashed Assets (cache forever)
         run: |
-          aws s3 sync dist/ s3://samuelojo-client-gallery-2026/ --delete \
+          aws s3 sync dist/assets "s3://$BUCKET/assets" \
+            --cache-control "public, max-age=31536000, immutable"
+
+      - name: Upload Other Static Files (cache 1 hour)
+        run: |
+          aws s3 sync dist/ "s3://$BUCKET/" \
+            --exclude "galleries/*" --exclude "assets/*" --exclude "index.html" \
+            --cache-control "public, max-age=3600"
+
+      - name: Upload index.html (never cache)
+        run: |
+          aws s3 cp dist/index.html "s3://$BUCKET/index.html" \
+            --cache-control "no-cache"
+
+      - name: Remove Stale Files
+        run: |
+          aws s3 sync dist/ "s3://$BUCKET/" --delete --size-only \
             --exclude "galleries/*"
 
       - name: Invalidate Amazon CloudFront Cache
+        id: invalidate
         run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DIST_ID || 'E1B2IZH9JKGO9B' }} \
-            --paths "/*"
+          id=$(aws cloudfront create-invalidation \
+            --distribution-id "${{ secrets.CLOUDFRONT_DIST_ID || 'E1B2IZH9JKGO9B' }}" \
+            --paths "/*" --query Invalidation.Id --output text)
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for Invalidation
+        run: |
+          aws cloudfront wait invalidation-completed \
+            --distribution-id "${{ secrets.CLOUDFRONT_DIST_ID || 'E1B2IZH9JKGO9B' }}" \
+            --id "${{ steps.invalidate.outputs.id }}"
+
+      # Fails the run if the live site or its JS bundle doesn't load.
+      - name: Smoke Test Live Site
+        run: |
+          set -euo pipefail
+          html=$(curl -fsS --retry 3 --retry-delay 5 "$SITE_URL/")
+          js=$(grep -oE 'assets/index-[^"]+\.js' <<<"$html" | head -1)
+          expected=$(grep -oE 'assets/index-[^"]+\.js' dist/index.html | head -1)
+          echo "live bundle: $js  expected: $expected"
+          [ "$js" = "$expected" ] || { echo "::error::Live site is not serving the new build"; exit 1; }
+          curl -fsS -o /dev/null "$SITE_URL/$js"
+          echo "Smoke test passed"
