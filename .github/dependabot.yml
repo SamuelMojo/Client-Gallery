@@ -9,6 +9,12 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    ignore:
+      # typescript-eslint 8.x only supports TypeScript <6.1, so the
+      # TypeScript 7 update can't install. Remove once typescript-eslint
+      # supports TS 7.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   # Keeps the SHA-pinned GitHub Actions in deploy.yml up to date.
   - package-ecosystem: github-actions
