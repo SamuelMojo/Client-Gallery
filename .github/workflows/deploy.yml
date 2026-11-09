@@ -88,9 +88,12 @@ jobs:
           aws-region: eu-west-2
           audience: sts.amazonaws.com
 
+      # galleries/ holds client photos uploaded through the admin dashboard,
+      # not build output — exclude it so --delete never wipes them.
       - name: Sync Build Output to Amazon S3
         run: |
-          aws s3 sync dist/ s3://samuelojo-client-gallery-2026/ --delete
+          aws s3 sync dist/ s3://samuelojo-client-gallery-2026/ --delete \
+            --exclude "galleries/*"
 
       - name: Invalidate Amazon CloudFront Cache
         run: |

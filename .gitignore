@@ -1,0 +1,7 @@
+# Local-only: live-site snapshot and DynamoDB backups (client photos, access PINs)
+site/
+backups/
+
+# Editor / OS
+.vscode/
+.DS_Store
