@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { signIn, signOut, getCurrentUser, fetchAuthSession } from '../auth';
+import { signIn, signOut, getCurrentUser } from '../auth';
+import GalleryUploader from '../components/GalleryUploader';
+import { stillKeyFor } from '../mediaTypes';
 
 interface PublicGallery {
   galleryId: string;
@@ -9,6 +11,27 @@ interface PublicGallery {
   coverKey?: string;
   coverImage?: string;
   imagesCount?: number;
+}
+
+/** Gallery card cover. Falls back to a placeholder if the image is missing (e.g. a video still being processed). */
+function CoverImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-neutral-700 font-mono text-xs">
+        No Preview
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+    />
+  );
 }
 
 export default function Home() {
@@ -28,15 +51,6 @@ export default function Home() {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminAuthError, setAdminAuthError] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
-
-  // Admin Upload form state
-  const [title, setTitle] = useState('');
-  const [clientName, setClientName] = useState('');
-  const [isPublic, setIsPublic] = useState(false);
-  const [files, setFiles] = useState<FileList | null>(null);
-  const [uploadStatus, setUploadStatus] = useState('');
-  const [createdUrl, setCreatedUrl] = useState('');
-  const [createdPin, setCreatedPin] = useState('');
 
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
   const CDN_BASE = import.meta.env.VITE_CDN_URL;
@@ -135,57 +149,8 @@ export default function Home() {
   const handleAdminLogout = async () => {
     await signOut();
     setIsAdminAuthenticated(false);
-    setCreatedUrl('');
-    setCreatedPin('');
   };
 
-  // 3. Admin Gallery Creation & Upload Handler
-  const handleUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!files || files.length === 0) return;
-
-    try {
-      setUploadStatus('Obtaining upload signatures...');
-      const session = await fetchAuthSession();
-      const token = session.tokens?.idToken?.toString();
-      const fileNames = Array.from(files).map((f) => f.name);
-
-      const res = await fetch(`${API_BASE}/admin/galleries`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ title, clientName, fileNames, isPublic }),
-      });
-
-      const data = await res.json();
-      const { galleryId, uploadUrls, accessPin } = data;
-
-      setUploadStatus(`Uploading ${files.length} images to S3...`);
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const match = uploadUrls.find((u: any) => u.fileName === file.name);
-        if (match) {
-          await fetch(match.uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': file.type },
-            body: file,
-          });
-        }
-      }
-
-      setUploadStatus('Gallery published successfully!');
-      setCreatedPin(accessPin);
-      setCreatedUrl(`${window.location.origin}/g/${galleryId}`);
-      setTitle('');
-      setClientName('');
-      setFiles(null);
-      loadPublicGalleries();
-    } catch (err: any) {
-      setUploadStatus(`Upload failed: ${err.message}`);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-black text-neutral-100 flex flex-col justify-between selection:bg-neutral-800">
@@ -261,93 +226,7 @@ export default function Home() {
               </form>
             ) : (
               /* Inline Gallery Creator Form */
-              <form onSubmit={handleUpload} className="space-y-4">
-                <div className="flex justify-between items-center pb-3 border-b border-neutral-800 mb-4">
-                  <span className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
-                    Active Admin Session
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleAdminLogout}
-                    className="text-xs text-neutral-500 hover:text-white transition uppercase"
-                  >
-                    Sign Out
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-neutral-400 uppercase tracking-wider mb-1">Gallery Title</label>
-                    <input
-                      type="text"
-                      required
-                      value={title}
-                      onChange={(e) => setTitle(e.target.value)}
-                      placeholder="e.g. Architectural Series"
-                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-neutral-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-neutral-400 uppercase tracking-wider mb-1">Client Name</label>
-                    <input
-                      type="text"
-                      required
-                      value={clientName}
-                      onChange={(e) => setClientName(e.target.value)}
-                      placeholder="e.g. Studio Red"
-                      className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-neutral-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3 py-1">
-                  <input
-                    type="checkbox"
-                    id="homeIsPublic"
-                    checked={isPublic}
-                    onChange={(e) => setIsPublic(e.target.checked)}
-                    className="h-4 w-4 rounded border-neutral-800 bg-neutral-900 text-white cursor-pointer"
-                  />
-                  <label htmlFor="homeIsPublic" className="text-xs text-neutral-300 select-none cursor-pointer">
-                    Showcase publicly in portfolio grid below
-                  </label>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-neutral-400 uppercase tracking-wider mb-1">Upload Images</label>
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={(e) => setFiles(e.target.files)}
-                    className="w-full text-xs text-neutral-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-neutral-800 file:text-white cursor-pointer"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-white hover:bg-neutral-200 text-black text-xs font-semibold uppercase tracking-wider rounded transition"
-                >
-                  Create & Upload Gallery
-                </button>
-
-                {uploadStatus && <p className="text-xs text-neutral-400 text-center">{uploadStatus}</p>}
-
-                {createdUrl && (
-                  <div className="p-4 bg-black border border-neutral-800 rounded space-y-2 mt-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-neutral-400 uppercase tracking-wider">Access PIN:</span>
-                      <span className="font-mono text-lg font-bold tracking-widest text-white">{createdPin}</span>
-                    </div>
-                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-1">
-                      <span className="text-xs text-neutral-400 uppercase tracking-wider">URL:</span>
-                      <a href={createdUrl} target="_blank" rel="noreferrer" className="text-xs font-mono text-blue-400 hover:underline break-all">
-                        {createdUrl}
-                      </a>
-                    </div>
-                  </div>
-                )}
-              </form>
+              <GalleryUploader onSignOut={handleAdminLogout} onCreated={loadPublicGalleries} />
             )}
           </div>
         </section>
@@ -416,12 +295,7 @@ export default function Home() {
                     className="group block relative aspect-[4/3] bg-neutral-950 border border-neutral-900 overflow-hidden rounded-sm hover:border-neutral-700 transition"
                   >
                     {imageKey ? (
-                      <img
-                        src={`${CDN_BASE}/${encodeURI(imageKey)}`}
-                        alt={gal.title}
-                        loading="lazy"
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                      />
+                      <CoverImage src={`${CDN_BASE}/${encodeURI(stillKeyFor(imageKey))}`} alt={gal.title} />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-neutral-700 font-mono text-xs">
                         No Preview

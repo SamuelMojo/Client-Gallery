@@ -1,10 +1,48 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { fetchAuthSession, getCurrentUser } from '../auth';
+import { Play } from 'lucide-react';
+import { extOf, kindOf } from '../mediaTypes';
 
+// One item in a gallery. Items saved before video support have no `type`, and are photos.
 interface GalleryImage {
   fileName: string;
   originalKey: string;
-  webKey: string;
+  webKey?: string; // web-sized webp for photos, transcoded mp4 for videos
+  posterKey?: string; // still frame for videos
+  type?: 'image' | 'video';
+  status?: 'processing' | 'ready' | 'failed';
+  size?: number;
+}
+
+// Above this size, downloads use a direct link instead of loading the file into memory.
+const BLOB_DOWNLOAD_LIMIT = 400 * 1e6;
+
+const isVideo = (m: GalleryImage) => m.type === 'video' || kindOf(m.fileName) === 'video';
+const isRaw = (m: GalleryImage) => kindOf(m.fileName) === 'raw';
+/** The still image shown in the grid: poster frame for videos, web version for photos. */
+const stillKey = (m: GalleryImage) => (isVideo(m) ? m.posterKey : m.webKey);
+const placeholderLabel = (m: GalleryImage) =>
+  m.status === 'processing' ? 'Processing…' : isVideo(m) ? 'Video' : isRaw(m) ? extOf(m.fileName) : 'No preview';
+
+function Thumb({ src, alt, label }: { src?: string; alt: string; label: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-[11px] uppercase tracking-widest text-neutral-600">
+        {label}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="w-full h-full object-cover transition duration-300 group-hover:scale-105"
+    />
+  );
 }
 
 interface GalleryData {
@@ -31,6 +69,14 @@ export default function GalleryView() {
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
   const [copied, setCopied] = useState(false);
+
+  // Admin-only: delete this gallery
+  const navigate = useNavigate();
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const CDN_BASE = import.meta.env.VITE_CDN_URL;
   const API_BASE = import.meta.env.VITE_API_BASE_URL;
@@ -67,6 +113,37 @@ export default function GalleryView() {
       fetchGallery();
     }
   }, [galleryId, API_BASE]);
+
+  // Clients are never signed in, so a Cognito session means the photographer.
+  useEffect(() => {
+    getCurrentUser()
+      .then(() => setIsAdmin(true))
+      .catch(() => setIsAdmin(false));
+  }, []);
+
+  const handleDelete = async () => {
+    if (!galleryId) return;
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      const session = await fetchAuthSession();
+      const token = session.tokens?.idToken?.toString();
+      if (!token) throw new Error('Your admin session has expired. Sign in again from the home page.');
+
+      const res = await fetch(`${API_BASE}/admin/galleries/${encodeURIComponent(galleryId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`Delete failed (HTTP ${res.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+      }
+      navigate('/', { replace: true });
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'Delete failed');
+      setDeleting(false);
+    }
+  };
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(currentUrl);
@@ -108,6 +185,22 @@ export default function GalleryView() {
 
   // Handle single high-res download
   const handleSingleDownload = async (img: GalleryImage) => {
+    // Photos and ordinary videos are fetched into the page and saved from there. That works in every
+    // browser, including Brave, which can block downloads that start on another site's address.
+    // Only very large files skip this, because a blob holds the whole file in memory; those are handed
+    // to the browser as a direct link. The originals are stored with "Content-Disposition: attachment",
+    // so the link saves the file and the page stays put.
+    if ((isVideo(img) || isRaw(img)) && (img.size ?? 0) > BLOB_DOWNLOAD_LIMIT) {
+      const link = document.createElement('a');
+      link.href = `${CDN_BASE}/${img.originalKey}`;
+      link.download = img.fileName;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
     try {
       const originalUrl = `${CDN_BASE}/${img.originalKey}`;
       const response = await fetch(originalUrl);
@@ -223,6 +316,9 @@ export default function GalleryView() {
     );
   }
 
+  const videoCount = gallery.images?.filter(isVideo).length ?? 0;
+  const photoCount = (gallery.images?.length ?? 0) - videoCount;
+
   return (
     <div className="min-h-screen bg-black text-neutral-100 pb-24">
       {/* Header bar */}
@@ -249,15 +345,29 @@ export default function GalleryView() {
 
           <div className="flex items-center gap-4">
             <span className="text-xs tracking-wider text-neutral-500 uppercase">
-              {gallery.images?.length || 0} Photos
+              {photoCount} Photo{photoCount === 1 ? '' : 's'}
+              {videoCount > 0 && ` · ${videoCount} Video${videoCount === 1 ? '' : 's'}`}
             </span>
             <button
               onClick={handleBatchDownload}
               disabled={isDownloadingAll || !gallery.images?.length}
               className="px-4 py-2 bg-neutral-100 hover:bg-white text-black text-xs font-semibold tracking-wide uppercase rounded transition disabled:opacity-50"
             >
-              {isDownloadingAll ? 'Preparing ZIP...' : 'Download All (ZIP)'}
+              {isDownloadingAll ? 'Preparing ZIP...' : videoCount > 0 ? 'Download Photos (ZIP)' : 'Download All (ZIP)'}
             </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteConfirm('');
+                  setDeleteError('');
+                  setShowDelete(true);
+                }}
+                className="px-4 py-2 border border-rose-900 text-rose-400 hover:bg-rose-950/50 text-xs font-semibold tracking-wide uppercase rounded transition"
+              >
+                Delete Gallery
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -301,12 +411,19 @@ export default function GalleryView() {
               className="group relative aspect-[3/2] bg-neutral-950 overflow-hidden cursor-pointer rounded-sm border border-neutral-900"
               onClick={() => setActivePhoto(img)}
             >
-              <img
-                src={`${CDN_BASE}/${img.webKey}`}
+              <Thumb
+                src={stillKey(img) ? `${CDN_BASE}/${stillKey(img)}` : undefined}
                 alt={img.fileName}
-                loading="lazy"
-                className="w-full h-full object-cover transition duration-300 group-hover:scale-105"
+                label={placeholderLabel(img)}
               />
+
+              {isVideo(img) && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="w-12 h-12 rounded-full bg-black/60 border border-white/30 flex items-center justify-center">
+                    <Play className="w-5 h-5 text-white fill-white" />
+                  </span>
+                </div>
+              )}
 
               {/* Hover overlay with single download button */}
               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3">
@@ -340,11 +457,35 @@ export default function GalleryView() {
             className="relative max-w-6xl max-h-[90vh] flex flex-col items-center"
             onClick={(e) => e.stopPropagation()}
           >
-            <img
-              src={`${CDN_BASE}/${activePhoto.webKey}`}
-              alt={activePhoto.fileName}
-              className="max-h-[80vh] w-auto object-contain select-none"
-            />
+            {isVideo(activePhoto) ? (
+              activePhoto.webKey && activePhoto.status !== 'processing' && activePhoto.status !== 'failed' ? (
+                <video
+                  key={activePhoto.originalKey}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  poster={activePhoto.posterKey ? `${CDN_BASE}/${activePhoto.posterKey}` : undefined}
+                  src={`${CDN_BASE}/${activePhoto.webKey}`}
+                  className="max-h-[80vh] max-w-full bg-black"
+                />
+              ) : (
+                <p className="py-24 px-8 text-sm text-neutral-400 text-center">
+                  {activePhoto.status === 'failed'
+                    ? 'The preview for this video could not be created. You can still download the original.'
+                    : 'This video is still being prepared for playback. You can download the original now.'}
+                </p>
+              )
+            ) : stillKey(activePhoto) ? (
+              <img
+                src={`${CDN_BASE}/${stillKey(activePhoto)}`}
+                alt={activePhoto.fileName}
+                className="max-h-[80vh] w-auto object-contain select-none"
+              />
+            ) : (
+              <p className="py-24 px-8 text-sm text-neutral-400 text-center">
+                No preview for this file type. Download the original to open it.
+              </p>
+            )}
             <div className="mt-4 flex items-center justify-between w-full px-2">
               <span className="text-xs text-neutral-400">{activePhoto.fileName}</span>
               <button
@@ -352,7 +493,7 @@ export default function GalleryView() {
                 onClick={() => handleSingleDownload(activePhoto)}
                 className="px-4 py-1.5 bg-white text-black text-xs font-semibold tracking-wider uppercase rounded hover:bg-neutral-200 transition"
               >
-                Download Master
+                Download Original
               </button>
             </div>
           </div>
@@ -363,6 +504,60 @@ export default function GalleryView() {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* Admin delete confirmation */}
+      {showDelete && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4"
+          onClick={() => !deleting && setShowDelete(false)}
+        >
+          <div
+            className="max-w-md w-full p-6 border border-rose-900/60 bg-neutral-950 rounded-lg space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-light tracking-tight">Delete this gallery?</h2>
+            <p className="text-sm text-neutral-400">
+              This permanently deletes <span className="text-neutral-200">{gallery.title}</span>, its{' '}
+              {gallery.images?.length || 0} file{(gallery.images?.length || 0) === 1 ? '' : 's'} including the
+              full-resolution originals, and its link and PIN. It cannot be undone.
+            </p>
+            <div>
+              <label htmlFor="deleteConfirm" className="block text-xs text-neutral-400 mb-1">
+                Type the gallery title to confirm
+              </label>
+              <input
+                id="deleteConfirm"
+                type="text"
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                placeholder={gallery.title}
+                autoFocus
+                disabled={deleting}
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 rounded text-sm text-white focus:outline-none focus:border-rose-700"
+              />
+            </div>
+            {deleteError && <p className="text-xs text-rose-500">{deleteError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDelete(false)}
+                disabled={deleting}
+                className="px-4 py-2 text-xs text-neutral-400 hover:text-white disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting || deleteConfirm.trim() !== gallery.title.trim()}
+                className="px-4 py-2 bg-rose-700 hover:bg-rose-600 text-white text-xs font-semibold tracking-wide uppercase rounded transition disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {deleting ? 'Deleting...' : 'Delete Forever'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
